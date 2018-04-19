@@ -1,19 +1,9 @@
 [package]
 name = "toxix"
 version = "0.1.0"
-links = "doubler"
-build = "build.rs"
-authors = [
-    "Amit Aryeh Levy <amit@amitlevy.com>", 
-    "Spencer Sands <ssands@princeton.edu>"
-]
+authors = ["Amit Aryeh Levy <amit@amitlevy.com>"]
 
 [dependencies]
 capsules = { path = "../../capsules" }
 kernel = { path = "../../kernel" }
 nix = "0.10.0"
-libc = "0.2"
-
-[build-dependencies]
-cc = { version = "1.0", features = ["parallel"] }
-pkg-config = "0.3"
