@@ -66,6 +66,14 @@ fn main() {
         app.init();
 
         println!("Hello World");
+
+        #[link(name = "doubler", kind="static")]
+        extern "C" {
+            pub fn doubler(i: ::std::os::raw::c_int) -> ::std::os::raw::c_int;
+        }
+        println!("Value: {}", doubler(6));
+
+
         board_kernel.kernel_loop(&Emulator, chip, Some(&ipc), &main_loop_capability);
     }
 }
