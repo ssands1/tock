@@ -4,6 +4,7 @@ extern crate core;
 extern crate capsules;
 extern crate kernel;
 extern crate nix;
+extern crate os_pipe;
 
 use kernel::{capabilities, create_capability, static_init};
 
@@ -11,6 +12,17 @@ mod arch;
 mod chip;
 
 use chip::alarm::*;
+
+/* piping example starts */
+use std::error::Error;
+use std::io::prelude::*;
+use std::io::{BufRead, BufReader};
+use std::process::{Command, Stdio};
+
+static PANGRAM: &'static str =
+"This is a message from Rust\n";
+
+/* and ends */
 
 struct Emulator;
 
@@ -67,12 +79,34 @@ fn main() {
 
         println!("Hello World");
 
+        /*
         #[link(name = "doubler", kind="static")]
         extern "C" {
             pub fn doubler(i: ::std::os::raw::c_int) -> ::std::os::raw::c_int;
         }
         println!("Value: {}", doubler(6));
+        */
+        
+        let process = match Command::new("./playground")
+                                .stdin(Stdio::piped())
+                                .stdout(Stdio::piped())
+                                .spawn() {
+            Err(err) => panic!("couldn't spawn process: {}", err.description()),
+            Ok(process) => process,
+        };
+        
+        // `stdin` has type `Option<ChildStdin>`, but since we know this instance
+        // must have one, we can directly `unwrap` it.
+        match process.stdin.unwrap().write_all(PANGRAM.as_bytes()) {
+            Err(err) => panic!("couldn't write to process stdin: {}",
+                               err.description()),
+            Ok(_) => println!("sent pangram to wc"),
+        }
 
+        let reader = BufReader::new(process.stdout.unwrap());
+        reader.lines()
+              .filter_map(|line| line.ok())
+              .for_each(|line| println!("{}", line));
 
         board_kernel.kernel_loop(&Emulator, chip, Some(&ipc), &main_loop_capability);
     }
