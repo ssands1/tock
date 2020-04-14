@@ -14,31 +14,21 @@ impl SysCall {
 impl kernel::syscall::UserspaceKernelBoundary for SysCall {
     type StoredState = ();
 
-    /// Get the syscall that the process called.
-    unsafe fn get_syscall(&self, _stack_pointer: *const usize) -> Option<kernel::syscall::Syscall> {
-        None
-    }
-
-    unsafe fn set_syscall_return_value(&self, _stack_pointer: *const usize, _return_value: isize) {
-    }
-
-    unsafe fn pop_syscall_stack_frame(
+    unsafe fn initialize_process(
         &self,
         stack_pointer: *const usize,
-        _state: &mut Self::StoredState,
-    ) -> *mut usize {
-        (stack_pointer as *mut usize).offset(8)
+        stack_size: usize,
+        state: &mut Self::StoredState,
+    ) -> Result<*const usize, ()> {
+        Err(())
     }
 
-    unsafe fn push_function_call(
+    unsafe fn set_syscall_return_value(
         &self,
         stack_pointer: *const usize,
-        _remaining_stack_memory: usize,
-        _callback: kernel::procs::FunctionCall,
-        _state: &Self::StoredState,
-    ) -> Result<*mut usize, *mut usize> {
-        Err((stack_pointer as *mut usize).offset(-8))
-    }
+        state: &mut Self::StoredState,
+        return_value: isize,
+    ) {}
 
     unsafe fn switch_to_process(
         &self,
@@ -48,14 +38,21 @@ impl kernel::syscall::UserspaceKernelBoundary for SysCall {
         (stack_pointer as *mut usize, kernel::syscall::ContextSwitchReason::Fault)
     }
 
-    unsafe fn fault_fmt(&self, _writer: &mut Write) {
+    unsafe fn print_context(
+        &self,
+        stack_pointer: *const usize,
+        state: &Self::StoredState,
+        writer: &mut dyn Write,
+    ) { }
+
+    unsafe fn set_process_function(
+        &self,
+        stack_pointer: *const usize,
+        remaining_stack_memory: usize,
+        state: &mut Self::StoredState,
+        callback: kernel::procs::FunctionCall,
+    ) -> Result<*mut usize, *mut usize> {
+        Err(stack_pointer as *mut usize)
     }
 
-    unsafe fn process_detail_fmt(
-        &self,
-        _stack_pointer: *const usize,
-        _state: &Self::StoredState,
-        _writer: &mut Write,
-    ) {
-    }
 }
