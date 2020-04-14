@@ -6,7 +6,7 @@ use std::sync::mpsc::Sender;
 use crate::chip;
 
 pub struct UnixAlarm<'a> {
-    client: OptionalCell<&'a kernel::hil::time::Client>,
+    client: OptionalCell<&'a kernel::hil::time::AlarmClient>,
     event_sender: Arc<Mutex<Option<Sender<chip::Event>>>>,
 }
 
@@ -16,10 +16,6 @@ impl<'a> UnixAlarm<'a> {
             client: OptionalCell::empty(),
             event_sender: Arc::new(Mutex::new(Some(event_sender))),
         }
-    }
-
-    pub fn set_client(&self, client: &'static kernel::hil::time::Client) {
-        self.client.set(client);
     }
 
     pub fn handle_interrupt(&self) {
@@ -32,22 +28,26 @@ impl<'a> UnixAlarm<'a> {
 impl<'a> kernel::hil::time::Time for UnixAlarm<'a> {
     type Frequency = kernel::hil::time::Freq1MHz;
 
-    fn disable(&self) {}
-
-    fn is_armed(&self) -> bool { true }
-}
-
-impl<'a> kernel::hil::time::Alarm for UnixAlarm<'a> {
-
     fn now(&self) -> u32 {
         if let Ok(duration) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-            (duration.as_secs() * 1000 + duration.subsec_millis() as u64) as u32
+            (duration.as_secs() * 1000 + duration.subsec_micros() as u64) as u32
         } else {
             0 // there was an error, not sure why there would be...
         }
     }
 
+    fn max_tics(&self) -> u32 {
+        core::u32::MAX
+    }
+}
+
+impl<'a> kernel::hil::time::Alarm<'a> for UnixAlarm<'a> {
+    fn set_client(&self, client: &'a kernel::hil::time::AlarmClient) {
+        self.client.set(client);
+    }
+
     fn set_alarm(&self, tics: u32) {
+        use kernel::hil::time::Time;
         let target = Duration::from_millis(tics.wrapping_sub(self.now()) as u64);
         let sender = self.event_sender.clone();
         thread::spawn(move || {
@@ -59,5 +59,13 @@ impl<'a> kernel::hil::time::Alarm for UnixAlarm<'a> {
     fn get_alarm(&self) -> u32 {
         0
     }
+
+    fn is_enabled(&self) -> bool {
+        true
+    }
+
+    fn enable(&self) { /* TODO */ }
+
+    fn disable(&self) { /* TODO */ }
 
 }

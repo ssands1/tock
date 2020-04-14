@@ -76,4 +76,6 @@ impl<'a> kernel::Chip for Chip<'a> {
             self.service_event(event);
         }
     }
+
+    unsafe fn print_state(&self, _: &mut dyn std::fmt::Write) { todo!() }
 }

@@ -6,6 +6,7 @@ extern crate kernel;
 extern crate nix;
 
 use kernel::{capabilities, create_capability, static_init};
+use kernel::hil::time::{Alarm};
 
 mod arch;
 mod chip;
@@ -27,7 +28,7 @@ struct Emulator;
 impl kernel::Platform for Emulator {
     fn with_driver<F, R>(&self, _driver_num: usize, f: F) -> R
     where
-        F: FnOnce(Option<&kernel::Driver>) -> R,
+        F: FnOnce(Option<&dyn kernel::Driver>) -> R,
     {
         f(None)
     }
@@ -35,7 +36,7 @@ impl kernel::Platform for Emulator {
 
 struct App<'a, A, B>
 where
-    A: kernel::hil::time::Alarm,
+    A: kernel::hil::time::Alarm<'a>,
     B: kernel::hil::led::Led,
 {
     alarm: &'a A,
@@ -43,7 +44,7 @@ where
 }
 
 impl<'a, A, B> App<'a, A, B> where
-    A: kernel::hil::time::Alarm,
+    A: kernel::hil::time::Alarm<'a>,
     B: kernel::hil::led::Led,
 {
     fn init(&self) {
@@ -51,9 +52,9 @@ impl<'a, A, B> App<'a, A, B> where
     }
 }
 
-impl<'a, A, B> kernel::hil::time::Client for App<'a, A, B>
+impl<'a, A, B> kernel::hil::time::AlarmClient for App<'a, A, B>
 where
-    A: kernel::hil::time::Alarm,
+    A: kernel::hil::time::Alarm<'a>,
     B: kernel::hil::led::Led,
 {
     fn fired(&self) {
@@ -68,17 +69,17 @@ unsafe fn run_app(name: &str) {
         .stderr(Stdio::piped())
         .spawn()
     {
-        Err(err) => panic!("couldn't spawn process: {}", err.description()),
+        Err(err) => panic!("couldn't spawn process: {}", err),
         Ok(process) => process,
     };
     // `stdin` has type `Option<ChildStdin>`, but since we know this instance
     // must have one, we can directly `unwrap` it.
     match process.stdin.unwrap().write_all(PANGRAM.as_bytes()) {
-        Err(err) => panic!("couldn't write to process stdin: {}", err.description()),
+        Err(err) => panic!("couldn't write to process stdin: {}", err),
         Ok(_) => println!("sent message to playground"),
     }
 
-    let reader = BufReader::new(process.stdout.unwrap());
+    let reader = BufReader::new(process.stderr.expect("stdout"));
     reader
         .lines()
         .filter_map(|line| line.ok())
