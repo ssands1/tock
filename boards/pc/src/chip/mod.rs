@@ -1,9 +1,10 @@
 use std::sync::mpsc::{channel, Receiver};
 
 pub mod alarm;
+pub mod led;
 
 use self::alarm::UnixAlarm;
-
+use self::led::UnixLed;
 
 #[derive(Copy, Clone)]
 pub enum Event {
@@ -14,6 +15,7 @@ pub struct Chip<'a> {
     syscall: crate::arch::syscall::SysCall,
     event_receiver: Receiver<Event>,
     pub alarm: UnixAlarm<'a>,
+    pub led: UnixLed<'a>,
 }
 
 impl<'a> Chip<'a> {
@@ -24,12 +26,13 @@ impl<'a> Chip<'a> {
             event_receiver: reciever,
 
             alarm: UnixAlarm::new(sender.clone()),
+            led: UnixLed::new(),
         }
     }
 
     fn service_event(&self, event: Event) {
         match event {
-            Event::Alarm => self.alarm.handle_interrupt()
+            Event::Alarm => self.alarm.handle_interrupt(),
         }
     }
 }
@@ -74,4 +77,3 @@ impl<'a> kernel::Chip for Chip<'a> {
         }
     }
 }
-
