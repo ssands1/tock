@@ -4,10 +4,18 @@ ifndef DEBUG
 CARGO_FLAGS += --release
 endif
 
-all: kernel
+all: kernel playground
+
+playground: playground.c led.c led.h tock.h tock.c
+	gcc -o $@ $^
 
 kernel:
 	cargo build $(CARGO_FLAGS)
 
-run:
+run: playground
 	cargo run $(CARGO_FLAGS)
+
+@PHONY: clean
+clean:
+	cargo clean
+	rm playground
