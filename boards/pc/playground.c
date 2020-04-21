@@ -5,10 +5,6 @@
 int main() {
     setbuf(stdout, NULL); // auto-flush after each printf
 
-    char inbox[32] = { 0 };
-    int r = read(STDIN_FILENO, inbox, sizeof(inbox)/sizeof(char) - 1);
-    printf("Read %d bytes and got a message from Rust: %s", r, inbox);
-    
     // quick and dirty sleeper
     int i = 0;
     while (i++ < 1000000000) 
@@ -16,6 +12,11 @@ int main() {
             printf(".\n");
 
     printf("There are %d LED(s) on this board\n", led_count());
+    
+    char inbox[32] = { 0 };
+    int r = read(STDIN_FILENO, inbox, sizeof(inbox)/sizeof(char) - 1);
+    printf("Read %d bytes and got a message from Rust: %s", r, inbox);
+    
     led_on(0);
     led_off(0);
     led_off(0);

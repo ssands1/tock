@@ -1,12 +1,12 @@
-use kernel::common::cells::OptionalCell;
-use std::time::{Duration, SystemTime};
-use std::thread;
-use std::sync::{Arc, Mutex};
-use std::sync::mpsc::Sender;
 use crate::chip;
+use kernel::common::cells::OptionalCell;
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, SystemTime};
 
 pub struct UnixAlarm<'a> {
-    client: OptionalCell<&'a kernel::hil::time::AlarmClient>,
+    client: OptionalCell<&'a dyn kernel::hil::time::AlarmClient>,
     event_sender: Arc<Mutex<Option<Sender<chip::Event>>>>,
 }
 
@@ -19,9 +19,7 @@ impl<'a> UnixAlarm<'a> {
     }
 
     pub fn handle_interrupt(&self) {
-        self.client.map(|client| {
-            client.fired()
-        });
+        self.client.map(|client| client.fired());
     }
 }
 
@@ -42,7 +40,7 @@ impl<'a> kernel::hil::time::Time for UnixAlarm<'a> {
 }
 
 impl<'a> kernel::hil::time::Alarm<'a> for UnixAlarm<'a> {
-    fn set_client(&self, client: &'a kernel::hil::time::AlarmClient) {
+    fn set_client(&self, client: &'a dyn kernel::hil::time::AlarmClient) {
         self.client.set(client);
     }
 
@@ -52,7 +50,10 @@ impl<'a> kernel::hil::time::Alarm<'a> for UnixAlarm<'a> {
         let sender = self.event_sender.clone();
         thread::spawn(move || {
             thread::sleep(target);
-            sender.lock().map(|m| m.as_ref().map(|sender| sender.send(chip::Event::Alarm))).unwrap();
+            sender
+                .lock()
+                .map(|m| m.as_ref().map(|sender| sender.send(chip::Event::Alarm)))
+                .unwrap();
         });
     }
 
@@ -64,8 +65,9 @@ impl<'a> kernel::hil::time::Alarm<'a> for UnixAlarm<'a> {
         true
     }
 
-    fn enable(&self) { /* TODO */ }
+    fn enable(&self) { /* TODO */
+    }
 
-    fn disable(&self) { /* TODO */ }
-
+    fn disable(&self) { /* TODO */
+    }
 }
