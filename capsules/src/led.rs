@@ -48,7 +48,7 @@
 //!   - `data`: The index of the LED. Starts at 0.
 //!   - Return: `SUCCESS` if the LED index was valid, `EINVAL` otherwise.
 
-use kernel::hil::gpio;
+use kernel::hil::led;
 use kernel::{AppId, Driver, ReturnCode};
 
 /// Syscall driver number.
@@ -57,20 +57,14 @@ pub const DRIVER_NUM: usize = driver::NUM::Led as usize;
 
 /// Holds the array of GPIO pins attached to the LEDs and implements a `Driver`
 /// interface to control them.
-pub struct LED<'a, P: gpio::Pin> {
-    pins_init: &'a [(&'a P, gpio::ActivationMode)],
+pub struct LED<'a> {
+    pins: &'a [&'a dyn led::Led],
 }
 
-impl<'a, P: gpio::Pin> LED<'a, P> {
-    pub fn new(pins_init: &'a [(&'a P, gpio::ActivationMode)]) -> Self {
-        // Make all pins output and off
-        for &(pin, mode) in pins_init.as_ref().iter() {
-            pin.make_output();
-            pin.write_activation(gpio::ActivationState::Inactive, mode);
-        }
-
-        Self {
-            pins_init: pins_init,
+impl<'a> LED<'a> {
+    pub fn new(pins: &'a [&'a dyn led::Led]) -> LED<'a> {
+        LED {
+            pins: pins,
         }
     }
 }
@@ -89,42 +83,39 @@ impl<P: gpio::Pin> Driver for LED<'_, P> {
     /// - `3`: Toggle the LED at index specified by `data` on or off. Returns
     ///        `EINVAL` if the LED index is not valid.
     fn command(&self, command_num: usize, data: usize, _: usize, _: AppId) -> ReturnCode {
-        let pins_init = self.pins_init.as_ref();
+        let pins = self.pins.as_ref();
         match command_num {
             // get number of LEDs
             0 => ReturnCode::SuccessWithValue {
-                value: pins_init.len() as usize,
+                value: pins.len() as usize,
             },
 
             // on
             1 => {
-                if data >= pins_init.len() {
+                if data >= pins.len() {
                     ReturnCode::EINVAL /* impossible pin */
                 } else {
-                    let (pin, mode) = pins_init[data];
-                    pin.write_activation(gpio::ActivationState::Active, mode);
+                    pins[data].on();
                     ReturnCode::SUCCESS
                 }
             }
 
             // off
             2 => {
-                if data >= pins_init.len() {
+                if data >= pins.len() {
                     ReturnCode::EINVAL /* impossible pin */
                 } else {
-                    let (pin, mode) = pins_init[data];
-                    pin.write_activation(gpio::ActivationState::Inactive, mode);
+                    pins[data].off();
                     ReturnCode::SUCCESS
                 }
             }
 
             // toggle
             3 => {
-                if data >= pins_init.len() {
+                if data >= pins.len() {
                     ReturnCode::EINVAL /* impossible pin */
                 } else {
-                    let (pin, _) = pins_init[data];
-                    pin.toggle();
+                    pins[data].toggle();
                     ReturnCode::SUCCESS
                 }
             }

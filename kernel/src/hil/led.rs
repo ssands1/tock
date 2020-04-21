@@ -8,9 +8,9 @@ use crate::hil::gpio;
 
 pub trait Led {
     fn init(&mut self);
-    fn on(&mut self);
-    fn off(&mut self);
-    fn toggle(&mut self);
+    fn on(&self);
+    fn off(&self);
+    fn toggle(&self);
     fn read(&self) -> bool;
 }
 
@@ -41,15 +41,15 @@ impl<P: gpio::Pin> Led for LedHigh<'_, P> {
         self.pin.make_output();
     }
 
-    fn on(&mut self) {
+    fn on(&self) {
         self.pin.set();
     }
 
-    fn off(&mut self) {
+    fn off(&self) {
         self.pin.clear();
     }
 
-    fn toggle(&mut self) {
+    fn toggle(&self) {
         self.pin.toggle();
     }
 
@@ -63,15 +63,15 @@ impl<P: gpio::Pin> Led for LedLow<'_, P> {
         self.pin.make_output();
     }
 
-    fn on(&mut self) {
+    fn on(&self) {
         self.pin.clear();
     }
 
-    fn off(&mut self) {
+    fn off(&self) {
         self.pin.set();
     }
 
-    fn toggle(&mut self) {
+    fn toggle(&self) {
         self.pin.toggle();
     }
 
