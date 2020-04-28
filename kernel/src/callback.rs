@@ -79,7 +79,7 @@ impl fmt::Debug for AppId {
 }
 
 impl AppId {
-    crate fn new(kernel: &'static Kernel, identifier: usize, index: usize) -> AppId {
+    pub fn new(kernel: &'static Kernel, identifier: usize, index: usize) -> AppId {
         AppId {
             kernel: kernel,
             identifier: identifier,
@@ -141,6 +141,16 @@ pub struct CallbackId {
     pub subscribe_num: usize,
 }
 
+// TODO: didn't work
+// impl CallbackId {
+//     pub fn new(driver_num: usize, subscribe_num: usize) -> CallbackId {
+//         CallbackId {
+//             driver_num: driver_num,
+//             subscribe_num: subscribe_num,
+//         }
+//     }
+// }
+
 /// Type for calling a callback in a process.
 ///
 /// This is essentially a wrapper around a function pointer.
@@ -153,15 +163,19 @@ pub struct Callback {
 }
 
 impl Callback {
-    crate fn new(
+    pub fn new(
         app_id: AppId,
-        callback_id: CallbackId,
+        driver_num: usize,
+        subscribe_num: usize,
         appdata: usize,
         fn_ptr: NonNull<*mut ()>,
     ) -> Callback {
         Callback {
             app_id,
-            callback_id,
+            callback_id: CallbackId {
+                driver_num,
+                subscribe_num,
+            },
             appdata,
             fn_ptr,
         }

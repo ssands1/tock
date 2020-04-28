@@ -1,8 +1,14 @@
 #include <stdio.h>
-#include "led.h"
+#include "libsimc/led.h"
+#include "libsimc/alarm.h"
 
 int main() {
     setbuf(stdout, NULL); // auto-flush after each printf
+
+    printf("There are %d LED(s) on this board\n", led_count());
+    
+    led_on(0);
+    led_off(0);
 
     // quick and dirty sleeper
     int i = 0;
@@ -10,26 +16,12 @@ int main() {
         if (i % 100000000 == 0)
             printf(".\n");
 
-    printf("There are %d LED(s) on this board\n", led_count());
-
-    
-    
-    led_on(0);
-    led_off(0);
     led_off(0);
     led_toggle(0);
-    led_on(0);
+    led_on(1);
+
+    // TODO: look at examples to fix this
+    alarm_at(3, NULL, NULL, NULL);
 
     return 0;
 }
-
-/* 
-
-Notes:
- - look into protocol buffer if json is too hard
- - copy led.c into playground.c and inline the command function there
- - might be a problem using printf because tock also uses printf
- - _start function will be different in the future
- - friday Tock call if done by then.
-
-*/

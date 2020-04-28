@@ -42,33 +42,3 @@ impl<'a> kernel::hil::led::Led for UnixLed<'a> {
         return self.is_on.get();
     }
 }
-
-// pub struct GPIOPin {
-//     is_high: bool
-// }
-
-// impl GPIOPin {
-//     const fn new() -> GPIOPin {
-//         GPIOPin {
-//             is_high: false,
-//         }
-//     }
-// }
-
-// impl kernel::hil::gpio::Output for UnixLed<'_> {
-//     fn read(&self) -> bool {
-//         self.is_high
-//     }
-// }
-
-// impl kernel::hil::gpio::Input for UnixLed<'_> {
-//     fn read(&self) -> bool {
-//         self.is_high
-//     }
-// }
-
-// impl kernel::hil::gpio::Configure for UnixLed<'_> {
-
-// }
-
-// impl kernel::hil::gpio::Pin for UnixLed<'_> {}

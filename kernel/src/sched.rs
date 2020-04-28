@@ -262,7 +262,7 @@ impl Kernel {
     ///
     /// Typically we just choose a larger number than we have used for any process
     /// before which ensures that the identifier is unique.
-    crate fn create_process_identifier(&self) -> usize {
+    pub fn create_process_identifier(&self) -> usize {
         self.process_identifier_max.get_and_increment()
     }
 
@@ -427,7 +427,8 @@ impl Kernel {
                                     let callback = NonNull::new(callback_ptr).map(|ptr| {
                                         Callback::new(
                                             process.appid(),
-                                            callback_id,
+                                            driver_number,
+                                            subdriver_number,
                                             appdata,
                                             ptr.cast(),
                                         )

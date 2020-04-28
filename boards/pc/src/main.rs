@@ -4,12 +4,15 @@ extern crate capsules;
 extern crate core;
 extern crate kernel;
 extern crate nix;
+extern crate num_derive;
+extern crate num_traits;
 
 use capsules::alarm::AlarmDriver;
+use capsules::led::LED;
 
 use kernel::{capabilities, create_capability, static_init};
+use kernel::{AppId, AppSlice, Callback, Platform, ReturnCode};
 use kernel::hil::time::{Alarm};
-use kernel::{Platform, ReturnCode};
 
 mod arch;
 mod chip;
@@ -17,110 +20,106 @@ mod chip;
 use chip::alarm::*;
 use chip::led;
 
-/* piping example starts */
+use num_derive::FromPrimitive;    
+use num_traits::FromPrimitive;
+
 use std::io::prelude::*;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
-use std::thread;
-
-use kernel::AppId;
-
-static PANGRAM: &'static str = "This is a message from Rust\n";
+use std::ptr::NonNull;
 
 const NUM_PROCS: usize = 4; // set to reflect most chips
+const NUM_LEDS: usize = 1;
 
-#[repr(u8)]
-enum Syscall { Yield, Memop, Command, Subscribe, Allow }
-
-/* and ends */
+#[derive(FromPrimitive)]
+enum Syscall { Command, Subscribe, Allow }
 
 struct Emulator {
     alarm: &'static AlarmDriver<'static, UnixAlarm<'static>>,
+    led: &'static LED<'static>,
 }
 
 impl Emulator {
-
-
-
-    fn do_command(d: &dyn kernel::Driver, app_id: &AppId, args: Vec<usize>) -> ReturnCode {
-        return d.command(args[2], args[3], args[4], *app_id);
+    fn do_command(
+        driver: &dyn kernel::Driver, 
+        app_id: &AppId, 
+        args: Vec<usize>
+    ) -> ReturnCode {
+        driver.command(args[2], args[3], args[4], *app_id)
     }
 
-    // fn do_subscribe(d: &dyn kernel::Driver, app_id: AppId, args:) -> ReturnCode {
-    //     d.subscribe(
-    //         nums[2], // subscribe_num
-    //         nums[3], // callback                                         
-    //         *app_id
-    //     );
-    // /* 
-    //         Callback: {
-    //             app_id,
-    //             callback_id: {
-    //                 driver_num,
-    //                 subscribe_num
-    //             },
-    //             appdata,
-    //             fn_ptr
-    //         } 
-    // */
-    // }
+    // TODO: Throw error if args[3] is null or simply pass None?
+    // TODO: appdata is usize but args[4] is void*?
+    fn do_subscribe(
+        driver: &dyn kernel::Driver,
+        app_id: &AppId,
+        args: Vec<usize>
+    ) -> ReturnCode {
+        let f_ptr = NonNull::new(args[3] as *mut *mut ()).unwrap();
+        let cb = Callback::new(*app_id, args[1], args[2], args[4] as usize, f_ptr);
+        driver.subscribe(args[2], Some(cb), *app_id)
+    }
 
-    // fn do_allow(d: &dyn kernel::Driver, app_id: AppId, args:) -> ReturnCode {
-    //     d.allow(
-    //         *app_id,
-    //         nums[2],
-    //         nums[3] // slice ptr of size nums[4]
-    //     )
-    // }
-
-
-    // TODO: Return a ReturnCode (e.g., if it can't spawn threads)
+    // TODO: Throw error if args[3] is null or simply pass None?
+    unsafe fn do_allow(
+        driver: &dyn kernel::Driver, 
+        app_id: &AppId,
+        args: Vec<usize>
+    ) -> ReturnCode {
+        let p = NonNull::new(args[3] as *mut u8).unwrap();
+        let slice = AppSlice::new(p, args[4], *app_id);
+        driver.allow(*app_id, args[2], Some(slice))
+    }
+    
+    // TODO: use dedicated pipe instead of stderr
     unsafe fn run_app(&self, name: &str, app_id: &AppId) {
         let process = match Command::new(format!("./{}", name))
             .stdin(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()
+            .spawn() 
         {
             Err(err) => panic!("couldn't spawn process: {}", err),
-            Ok(proc) => proc,
+            Ok(process) => process,
         };
         
+        // `stdin` has type `Option<ChildStdin>`, but since we know 
+        // this instance must have one, we can directly `unwrap` it.
         let writer = &mut process.stdin.unwrap();
         
-        // Process calls from apps
         BufReader::new(process.stderr.expect("stdout"))
             .lines()
             .filter_map(|line| line.ok())
             .for_each(|line| {
-                // parse call args into Vec<usize>
+                // TODO: Assert length/formatting
                 let args: Vec<usize> = line
                     .split(",")
                     .map(|val| val.parse::<usize>())
                     .filter_map(Result::ok)
                     .collect();
-                    
-                // TODO: Assert length/formatting, add more callse
+
+                // TODO: add more calls eg memop
                 self.with_driver(args[1], |driver| {
-                    let r_code: usize = match driver {
+                    let r_code: isize = match driver {
                         None => ReturnCode::ENODEVICE.into(),
-                        Some(d) => match args[0] {
-                            0 => match Emulator::do_command(d, app_id, args) {
-                                ReturnCode::SuccessWithValue { value } => value,
-                                r => r.into()
-                            },
-                            // 1 => do_subscribe(d, app_id, args),
-                            // 2 => do_allow(d, app_id, args),
-                            _ => ReturnCode::ENODEVICE.into(),
-                        }
+                        Some(d) => match FromPrimitive::from_usize(args[0]) {
+                            Some(Syscall::Command) => 
+                                Emulator::do_command(d, app_id, args),
+                            Some(Syscall::Subscribe) => 
+                                Emulator::do_subscribe(d, app_id, args),
+                            Some(Syscall::Allow) => 
+                                Emulator::do_allow(d, app_id, args),
+                            None => {
+                                println!("Error: unknown syscall");
+                                ReturnCode::EINVAL
+                            }
+                        }.into()
                     };
                     
-                    println!("hiiii {}", r_code);
-                    // `stdin` has type `Option<ChildStdin>`, but since we know 
-                    // this instance must have one, we can directly `unwrap` it.
+                    // println!("I'm writing {}", r_code.to_string());
                     match writer.write_all(r_code.to_string().as_bytes()) {
-                        Err(e) => panic!("Error: {}", e),
-                        Ok(_) => {}//println!("Success!"),
-                    } 
+                        Err(err) => panic!("Error writing: {}", err),
+                        Ok(_) => {}
+                    };
                 });
             });      
     }
@@ -132,6 +131,8 @@ impl kernel::Platform for Emulator {
         F: FnOnce(Option<&dyn kernel::Driver>) -> R,
     {
         match driver_num {
+            capsules::alarm::DRIVER_NUM => f(Some(self.alarm)),
+            capsules::led::DRIVER_NUM => f(Some(self.led)),
             capsules::console::DRIVER_NUM => f(Some(self.alarm)),
             _ => f(None),
         }
@@ -187,20 +188,12 @@ fn main() {
 
         chip.alarm.set_client(alarm);
 
-        // let led_pins = static_init!(
-        //     [(
-        //         &'static dyn kernel::hil::gpio::Pin,
-        //         kernel::hil::gpio::ActivationMode
-        //     ); 1],
-        //     [(
-        //         &led::GPIOPin::new(),
-        //         kernel::hil::gpio::ActivationMode::ActiveHigh
-        //     )]
-        // );
-        // let led = static_init!(
-        //     capsules::led::LED<'static>,
-        //     capsules::led::LED::new(led_pins)
-        // );
+        let unix_led = static_init!(led::UnixLed<'static>, led::UnixLed::new());
+        let pins = static_init!([&dyn kernel::hil::led::Led; NUM_LEDS], [unix_led]);
+        let led = static_init!(
+            capsules::led::LED<'static>,
+            capsules::led::LED::new(pins)
+        );
 
         let ipc = kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability);
 
@@ -209,14 +202,12 @@ fn main() {
         chip.alarm.set_client(app);
         app.init();
 
-        println!("Hello World");
-        
-        let emulator = Emulator {
-            alarm,
-        };
+        let emulator = Emulator { alarm, led };
                 
-        let processes = [Some("playground"), None, None, None];
+        let processes: [Option<&str>; NUM_PROCS] = 
+            [Some("playground"), None, None, None];
 
+        // TODO: Fix index arg
         for i in 0..processes.len() { 
             match processes[i] {
                 None => {},
@@ -231,6 +222,6 @@ fn main() {
             }
         }
 
-        board_kernel.kernel_loop(&emulator, chip, Some(&ipc), &main_loop_capability);
+        // board_kernel.kernel_loop(&emulator, chip, Some(&ipc), &main_loop_capability);
     }
 }
