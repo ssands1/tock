@@ -1950,3 +1950,283 @@ impl<C: 'static + Chip> Process<'a, C> {
         current_state != State::StoppedFaulted && current_state != State::Fault
     }
 }
+
+pub struct SimProcess {
+    /// Identifier of this process and the index of the process in the process
+    /// table.
+    app_id: Cell<AppId>,
+
+    /// Pointer to the main Kernel struct.
+    kernel: &'static Kernel,
+
+    alarm_grant_ptr: *mut u8,
+}
+
+impl ProcessType for SimProcess {
+    /// Returns the process's identifier
+    fn appid(&self) -> AppId { self.app_id.get() }
+
+    /// Queue a `Task` for the process. This will be added to a per-process
+    /// buffer and executed by the scheduler. `Task`s are some function the app
+    /// should run, for example a callback or an IPC call.
+    ///
+    /// This function returns `true` if the `Task` was successfully enqueued,
+    /// and `false` otherwise. This is represented as a simple `bool` because
+    /// this is passed to the capsule that tried to schedule the `Task`.
+    ///
+    /// This will fail if the process is no longer active, and therefore cannot
+    /// execute any new tasks.
+    fn enqueue_task(&self, task: Task) -> bool { true }
+
+    /// Remove the scheduled operation from the front of the queue and return it
+    /// to be handled by the scheduler.
+    ///
+    /// If there are no `Task`s in the queue for this process this will return
+    /// `None`.
+    fn dequeue_task(&self) -> Option<Task> { None }
+
+    /// Remove all scheduled callbacks for a given callback id from the task
+    /// queue.
+    fn remove_pending_callbacks(&self, callback_id: CallbackId) { }
+
+    /// Returns the current state the process is in. Common states are "running"
+    /// or "yielded".
+    fn get_state(&self) -> State { State::Running }
+
+    /// Move this process from the running state to the yielded state.
+    ///
+    /// This will fail (i.e. not do anything) if the process was not previously
+    /// running.
+    fn set_yielded_state(&self) {}
+
+    /// Move this process from running or yielded state into the stopped state.
+    ///
+    /// This will fail (i.e. not do anything) if the process was not either
+    /// running or yielded.
+    fn stop(&self) {}
+
+    /// Move this stopped process back into its original state.
+    ///
+    /// This transitions a process from `StoppedRunning` -> `Running` or
+    /// `StoppedYielded` -> `Yielded`.
+    fn resume(&self) {}
+
+    /// Put this process in the fault state. This will trigger the
+    /// `FaultResponse` for this process to occur.
+    fn set_fault_state(&self) {}
+
+    /// Returns how many times this process has been restarted.
+    fn get_restart_count(&self) -> usize { 0 }
+
+    /// Get the name of the process. Used for IPC.
+    fn get_process_name(&self) -> &'static str { "hi" }
+
+    // memop operations
+
+    /// Change the location of the program break and reallocate the MPU region
+    /// covering program memory.
+    ///
+    /// This will fail with an error if the process is no longer active. An
+    /// inactive process will not run again without being reset, and changing
+    /// the memory pointers is not valid at this point.
+    fn brk(&self, new_break: *const u8) -> Result<*const u8, Error> {Ok(&0)}
+
+    /// Change the location of the program break, reallocate the MPU region
+    /// covering program memory, and return the previous break address.
+    ///
+    /// This will fail with an error if the process is no longer active. An
+    /// inactive process will not run again without being reset, and changing
+    /// the memory pointers is not valid at this point.
+    fn sbrk(&self, increment: isize) -> Result<*const u8, Error> {Ok(&0)}
+
+    /// The start address of allocated RAM for this process.
+    fn mem_start(&self) -> *const u8 { &0 }
+
+    /// The first address after the end of the allocated RAM for this process.
+    fn mem_end(&self) -> *const u8 { &0 }
+
+    /// The start address of the flash region allocated for this process.
+    fn flash_start(&self) -> *const u8 { &0 }
+
+    /// The first address after the end of the flash region allocated for this
+    /// process.
+    fn flash_end(&self) -> *const u8 { &0 }
+
+    /// The lowest address of the grant region for the process.
+    fn kernel_memory_break(&self) -> *const u8 { &0 } 
+
+    /// How many writeable flash regions defined in the TBF header for this
+    /// process.
+    fn number_writeable_flash_regions(&self) -> usize { 0 }
+
+    /// Get the offset from the beginning of flash and the size of the defined
+    /// writeable flash region.
+    fn get_writeable_flash_region(&self, region_index: usize) -> (u32, u32) {(0,0)}
+
+    /// Debug function to update the kernel on where the stack starts for this
+    /// process. Processes are not required to call this through the memop
+    /// system call, but it aids in debugging the process.
+    fn update_stack_start_pointer(&self, stack_pointer: *const u8) {}
+
+    /// Debug function to update the kernel on where the process heap starts.
+    /// Also optional.
+    fn update_heap_start_pointer(&self, heap_pointer: *const u8) {}
+
+    // additional memop like functions
+
+    /// Creates an `AppSlice` from the given offset and size in process memory.
+    ///
+    /// If `buf_start_addr` is NULL this will have no effect and the return
+    /// value will be `None` to signal the capsule to drop the buffer.
+    ///
+    /// If the process is not active then this will return an error as it is not
+    /// valid to "allow" a buffer for a process that will not resume executing.
+    /// In practice this case should not happen as the process will not be
+    /// executing to call the allow syscall.
+    ///
+    /// ## Returns
+    ///
+    /// If the buffer is null (a zero-valued offset) this returns `None`,
+    /// signaling the capsule to delete the entry. If the buffer is within the
+    /// process's accessible memory, returns an `AppSlice` wrapping that buffer.
+    /// Otherwise, returns an error `ReturnCode`.
+    fn allow(
+        &self,
+        buf_start_addr: *const u8,
+        size: usize,
+    ) -> Result<Option<AppSlice<Shared, u8>>, ReturnCode> {Ok(None)}
+
+    /// Get the first address of process's flash that isn't protected by the
+    /// kernel. The protected range of flash contains the TBF header and
+    /// potentially other state the kernel is storing on behalf of the process,
+    /// and cannot be edited by the process.
+    fn flash_non_protected_start(&self) -> *const u8 {&0}
+
+    // mpu
+
+    /// Configure the MPU to use the process's allocated regions.
+    ///
+    /// It is not valid to call this function when the process is inactive (i.e.
+    /// the process will not run again).
+    fn setup_mpu(&self) {}
+
+    /// Allocate a new MPU region for the process that is at least
+    /// `min_region_size` bytes and lies within the specified stretch of
+    /// unallocated memory.
+    ///
+    /// It is not valid to call this function when the process is inactive (i.e.
+    /// the process will not run again).
+    fn add_mpu_region (
+        &self,
+        unallocated_memory_start: *const u8,
+        unallocated_memory_size: usize,
+        min_region_size: usize,
+    ) -> Option<mpu::Region> {None}
+
+    // grants
+
+    /// Create new memory in the grant region, and check that the MPU region
+    /// covering program memory does not extend past the kernel memory break.
+    ///
+    /// This will return `None` and fail if the process is inactive.
+    fn alloc(&self, size: usize, align: usize) -> Option<NonNull<u8>> {None}
+
+    unsafe fn free(&self, _: *mut u8) {}
+
+    /// Get the grant pointer for this grant number.
+    ///
+    /// This will return `None` if the process is inactive and the grant region
+    /// cannot be used.
+    ///
+    /// Caution: The grant may not have been allocated yet, so it is possible
+    /// for this grant pointer to be null.
+    #[allow(clippy::cast_ptr_alignment)]
+    fn get_grant_ptr(&self, grant_num: usize) -> Option<*mut u8> {
+        // // Do not try to access the grant region of inactive process.
+        // if !self.is_active() {
+        //     return None;
+        // }
+        
+        // Sanity check the argument
+        if grant_num >= self.kernel.get_grant_count_and_finalize() {
+            return None;
+        }
+        
+        Some(self.alarm_grant_ptr)
+        
+        // let grant_num = grant_num as isize;
+        // let grant_pointer = unsafe {
+        //     let grant_pointer_array = self.mem_end() as *const *mut u8;
+        //     *grant_pointer_array.offset(-(grant_num + 1))
+        // };
+        // Some(grant_pointer)
+    }
+
+    /// Set the grant pointer for this grant number.
+    ///
+    /// Note: This method trusts arguments completely, that is, it assumes the
+    /// index into the grant array is valid and the pointer is to an allocated
+    /// grant region in the process memory.
+    unsafe fn set_grant_ptr(&self, grant_num: usize, grant_ptr: *mut u8) {}
+
+    // functions for processes that are architecture specific
+
+    /// Set the return value the process should see when it begins executing
+    /// again after the syscall.
+    ///
+    /// It is not valid to call this function when the process is inactive (i.e.
+    /// the process will not run again).
+    unsafe fn set_syscall_return_value(&self, return_value: isize) {}
+
+    /// Set the function that is to be executed when the process is resumed.
+    ///
+    /// It is not valid to call this function when the process is inactive (i.e.
+    /// the process will not run again).
+    unsafe fn set_process_function(&self, callback: FunctionCall) {}
+
+    /// Context switch to a specific process.
+    ///
+    /// This will return `None` if the process is inactive and cannot be
+    /// switched to.
+    unsafe fn switch_to(&self) -> Option<syscall::ContextSwitchReason> {None}
+
+    /// Print out the memory map (Grant region, heap, stack, program
+    /// memory, BSS, and data sections) of this process.
+    unsafe fn print_memory_map(&self, writer: &mut dyn Write) {}
+
+    /// Print out the full state of the process: its memory map, its
+    /// context, and the state of the memory protection unit (MPU).
+    unsafe fn print_full_process(&self, writer: &mut dyn Write) {}
+
+    // debug
+
+    /// Returns how many syscalls this app has called.
+    fn debug_syscall_count(&self) -> usize {0}
+
+    /// Returns how many callbacks for this process have been dropped.
+    fn debug_dropped_callback_count(&self) -> usize {0}
+
+    /// Returns how many times this process has exceeded its timeslice.
+    fn debug_timeslice_expiration_count(&self) -> usize {0}
+
+    /// Increment the number of times the process has exceeded its timeslice.
+    fn debug_timeslice_expired(&self) {}
+
+    /// Increment the number of times the process called a syscall and record
+    /// the last syscall that was called.
+    fn debug_syscall_called(&self, last_syscall: Syscall) {}
+}
+
+impl SimProcess {
+    pub fn create(
+        kernel: &'static Kernel, 
+        app_id: AppId, 
+        alarm_grant_ptr: *mut u8
+    ) -> SimProcess {
+        SimProcess { 
+            kernel, 
+            app_id: Cell::new(app_id),
+            alarm_grant_ptr 
+        }
+    }
+}

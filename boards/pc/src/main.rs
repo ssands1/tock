@@ -3,15 +3,17 @@
 extern crate capsules;
 extern crate core;
 extern crate kernel;
+extern crate libc;
 extern crate nix;
 extern crate num_derive;
 extern crate num_traits;
 
-use capsules::alarm::AlarmDriver;
+use capsules::alarm::{AlarmData, AlarmDriver};
 use capsules::led::LED;
 
 use kernel::{capabilities, create_capability, static_init};
 use kernel::{AppId, AppSlice, Callback, Platform, ReturnCode};
+use kernel::procs::SimProcess;
 use kernel::hil::time::{Alarm};
 
 mod arch;
@@ -23,16 +25,25 @@ use chip::led;
 use num_derive::FromPrimitive;    
 use num_traits::FromPrimitive;
 
+use std::alloc::{alloc, dealloc, Layout, System};
 use std::io::prelude::*;
 use std::io::{BufRead, BufReader};
+use std::mem::size_of;
 use std::process::{Command, Stdio};
 use std::ptr::NonNull;
+use std::thread;
 
 const NUM_PROCS: usize = 4; // set to reflect most chips
 const NUM_LEDS: usize = 1;
 
+#[global_allocator]
+static A: System = System;
+
+static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROCS] =
+    [None; NUM_PROCS];
+
 #[derive(FromPrimitive)]
-enum Syscall { Command, Subscribe, Allow }
+enum Syscall { Command, Subscribe, Yield }
 
 struct Emulator {
     alarm: &'static AlarmDriver<'static, UnixAlarm<'static>>,
@@ -61,7 +72,7 @@ impl Emulator {
     }
 
     // TODO: Throw error if args[3] is null or simply pass None?
-    unsafe fn do_allow(
+    unsafe fn do_yield(
         driver: &dyn kernel::Driver, 
         app_id: &AppId,
         args: Vec<usize>
@@ -106,8 +117,8 @@ impl Emulator {
                                 Emulator::do_command(d, app_id, args),
                             Some(Syscall::Subscribe) => 
                                 Emulator::do_subscribe(d, app_id, args),
-                            Some(Syscall::Allow) => 
-                                Emulator::do_allow(d, app_id, args),
+                            Some(Syscall::Yield) => 
+                                Emulator::do_yield(d, app_id, args),
                             None => {
                                 println!("Error: unknown syscall");
                                 ReturnCode::EINVAL
@@ -115,7 +126,7 @@ impl Emulator {
                         }.into()
                     };
                     
-                    // println!("I'm writing {}", r_code.to_string());
+                    println!("I'm writing {}", r_code.to_string());
                     match writer.write_all(r_code.to_string().as_bytes()) {
                         Err(err) => panic!("Error writing: {}", err),
                         Ok(_) => {}
@@ -174,13 +185,14 @@ fn main() {
         let memory_allocation_capability =
             create_capability!(capabilities::MemoryAllocationCapability);
 
-        let board_kernel = static_init!(kernel::Kernel, kernel::Kernel::new(&[]));
+        let board_kernel = static_init!(kernel::Kernel, kernel::Kernel::new(&PROCESSES));
 
         let chip = static_init!(chip::Chip<'static>, chip::Chip::new());
 
+        // Set up Alarm
         let alarm = static_init!(
-            capsules::alarm::AlarmDriver<'static, UnixAlarm>,
-            capsules::alarm::AlarmDriver::new(
+            AlarmDriver<'static, UnixAlarm>,
+            AlarmDriver::new(
                 &chip.alarm,
                 board_kernel.create_grant(&memory_allocation_capability)
             )
@@ -188,22 +200,21 @@ fn main() {
 
         chip.alarm.set_client(alarm);
 
+        // Set up LED
         let unix_led = static_init!(led::UnixLed<'static>, led::UnixLed::new());
         let pins = static_init!([&dyn kernel::hil::led::Led; NUM_LEDS], [unix_led]);
-        let led = static_init!(
-            capsules::led::LED<'static>,
-            capsules::led::LED::new(pins)
-        );
+        let led = static_init!(LED<'static>, LED::new(pins));
 
-        let ipc = kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability);
-
+        // Set up app
         let app = static_init!(App<chip::alarm::UnixAlarm, chip::led::UnixLed>, 
-                               App { alarm: &chip.alarm, led: &chip.led });
-        chip.alarm.set_client(app);
-        app.init();
-
+            App { alarm: &chip.alarm, led: &chip.led });
+            chip.alarm.set_client(app);
+            app.init();
+        
+        let ipc = kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability);
+            
         let emulator = Emulator { alarm, led };
-                
+
         let processes: [Option<&str>; NUM_PROCS] = 
             [Some("playground"), None, None, None];
 
@@ -217,11 +228,23 @@ fn main() {
                         board_kernel.create_process_identifier(),
                         i
                     );
+
+                    // TODO: Allocate memory in process.rs, not here
+                    // Note: A grant region is valid once allocated
+                    // for the lifetime of the process.
+                    let alarm_layout = Layout::new::<AlarmData>();
+                    let alarm_ptr = alloc(alarm_layout);
+                    
+                    let process = static_init!(
+                        SimProcess,
+                        SimProcess::create(board_kernel, app_id, alarm_ptr as *mut u8)
+                    );
+                    PROCESSES[i] = Some(process);
                     emulator.run_app(name, &app_id);
+                    dealloc(alarm_ptr, alarm_layout);
                 }
             }
         }
-
-        // board_kernel.kernel_loop(&emulator, chip, Some(&ipc), &main_loop_capability);
+        board_kernel.kernel_loop(&emulator, chip, Some(&ipc), &main_loop_capability);
     }
 }
