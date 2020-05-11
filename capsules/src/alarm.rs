@@ -182,6 +182,8 @@ fn has_expired(alarm: u32, now: u32, prev: u32) -> bool {
 
 impl<A: Alarm<'a>> time::AlarmClient for AlarmDriver<'a, A> {
     fn fired(&self) {
+        panic!("inside alarm");
+
         let now = self.alarm.now();
         self.app_alarm.each(|alarm| {
             if let Expiration::Abs(exp) = alarm.expiration {

@@ -1,33 +1,22 @@
-#include <stdio.h>
 #include "libsimc/led.h"
-#include "libsimc/alarm.h"
+#include "libsimc/timer.h"
 
-void my_cb(int a, int b, int c, void* vp) {
-    printf("This is within a callback\n");
-}
+int main(void) {
+    // Ask the kernel how many LEDs are on this board.
+    int num_leds = led_count();
 
-int main() {
-    setbuf(stdout, NULL); // auto-flush after each printf
+    // Blink the LEDs in a binary count pattern and scale
+    // to the number of LEDs on the board.
+    for (int count = 0; ; count++) {
+        for (int i = 0; i < num_leds; i++) {
+            if (count & (1 << i)) {
+                led_on(i);
+            } else {
+                led_off(i);
+            }
+        }
 
-    printf("There are %d LED(s) on this board\n", led_count());
-    
-    led_on(0);
-    led_off(0);
-
-    // // quick and dirty sleeper
-    // int i = 0;
-    // while (i++ < 1000000000) 
-    //     if (i % 100000000 == 0)
-    //         printf(".\n");
-
-    led_off(0);
-    led_toggle(0);
-    led_on(1);
-
-    printf("\nTesting Alarm:\n");
-    alarm_t alarm;
-    // alarm_at(0, my_cb, NULL, &alarm);
-    printf("Alarm reads: %ld\n", alarm_read());
-
-    return 0;
+        // This delay uses an underlying timer in the kernel.
+        delay_ms(0);
+    }
 }

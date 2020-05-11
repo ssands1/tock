@@ -48,39 +48,77 @@ enum Syscall { Command, Subscribe, Yield }
 struct Emulator {
     alarm: &'static AlarmDriver<'static, UnixAlarm<'static>>,
     led: &'static LED<'static>,
+    // writers: Option<&mut std::process::ChildStdin>,
+    callbacks: usize, // TODO: Can you subscribe to more than 1 callback at a time?
+                      // TODO: writers and callbacks need to handle more than 1 app
 }
 
 impl Emulator {
+    fn new(
+        alarm: &'static AlarmDriver<'static, UnixAlarm<'static>>,
+        led: &'static LED<'static>
+    ) -> Emulator {
+        Emulator {
+            alarm,
+            led,
+            // writers: None,
+            callbacks: 0,
+        }
+    }
+
     fn do_command(
         driver: &dyn kernel::Driver, 
         app_id: &AppId, 
         args: Vec<usize>
-    ) -> ReturnCode {
-        driver.command(args[2], args[3], args[4], *app_id)
+    ) -> isize {
+        driver.command(args[2], args[3], args[4], *app_id).into()
     }
 
     // TODO: Throw error if args[3] is null or simply pass None?
     // TODO: appdata is usize but args[4] is void*?
+    // Note: currently only one subscribe is allowed at a time. See self.callback
     fn do_subscribe(
+        // &self,
         driver: &dyn kernel::Driver,
         app_id: &AppId,
         args: Vec<usize>
-    ) -> ReturnCode {
-        let f_ptr = NonNull::new(args[3] as *mut *mut ()).unwrap();
-        let cb = Callback::new(*app_id, args[1], args[2], args[4] as usize, f_ptr);
-        driver.subscribe(args[2], Some(cb), *app_id)
+    ) -> isize {
+        println!("subscribing");
+        let cb = if args[3] == 0 {
+            None // null function pointer
+        } else {
+            // self.callbacks = args[3];
+            let f_ptr = NonNull::new(Emulator::callback_helper as *mut *mut ())
+                .unwrap();
+            Some(Callback::new(*app_id, args[1], args[2], args[4] as usize, f_ptr))
+        };
+        driver.subscribe(args[2], cb, *app_id).into()
+    }
+
+    fn callback_helper(arg0: usize, arg1: usize, arg2: usize, arg3: usize) {
+        // TODO
+        /* 
+         * Problem: This function needs to do
+         *      `writer.write_all(args[3].to_string().as_bytes())`
+         * but writer and args[3] aren't in scope
+        */
+        println!("Callback FIRED!");
     }
 
     // TODO: Throw error if args[3] is null or simply pass None?
     unsafe fn do_yield(
-        driver: &dyn kernel::Driver, 
+        // &self,
+        driver: &dyn kernel::Driver,
         app_id: &AppId,
         args: Vec<usize>
-    ) -> ReturnCode {
-        let p = NonNull::new(args[3] as *mut u8).unwrap();
-        let slice = AppSlice::new(p, args[4], *app_id);
-        driver.allow(*app_id, args[2], Some(slice))
+    ) {
+        // let p = NonNull::new(args[3] as *mut u8).unwrap();
+        // let slice = AppSlice::new(p, args[4], *app_id);
+        // driver.allow(*app_id, args[2], Some(slice))
+        println!("yielding...");
     }
+    
+    
     
     // TODO: use dedicated pipe instead of stderr
     unsafe fn run_app(&self, name: &str, app_id: &AppId) {
@@ -96,6 +134,13 @@ impl Emulator {
         // `stdin` has type `Option<ChildStdin>`, but since we know 
         // this instance must have one, we can directly `unwrap` it.
         let writer = &mut process.stdin.unwrap();
+        let mut write = |r_code: isize| { 
+            println!("I'm writing {}", r_code.to_string());
+            match writer.write_all(r_code.to_string().as_bytes()) {
+                Err(err) => panic!("Error writing: {}", err),
+                Ok(_) => {}
+            };
+        };
         
         BufReader::new(process.stderr.expect("stdout"))
             .lines()
@@ -110,27 +155,21 @@ impl Emulator {
 
                 // TODO: add more calls eg memop
                 self.with_driver(args[1], |driver| {
-                    let r_code: isize = match driver {
-                        None => ReturnCode::ENODEVICE.into(),
+                    match driver {
+                        None => write(ReturnCode::ENODEVICE.into()),
                         Some(d) => match FromPrimitive::from_usize(args[0]) {
                             Some(Syscall::Command) => 
-                                Emulator::do_command(d, app_id, args),
+                                write(Emulator::do_command(d, app_id, args)),
                             Some(Syscall::Subscribe) => 
-                                Emulator::do_subscribe(d, app_id, args),
+                                write(Emulator::do_subscribe(d, app_id, args)),
                             Some(Syscall::Yield) => 
                                 Emulator::do_yield(d, app_id, args),
                             None => {
                                 println!("Error: unknown syscall");
-                                ReturnCode::EINVAL
+                                write(ReturnCode::EINVAL.into());
                             }
-                        }.into()
-                    };
-                    
-                    println!("I'm writing {}", r_code.to_string());
-                    match writer.write_all(r_code.to_string().as_bytes()) {
-                        Err(err) => panic!("Error writing: {}", err),
-                        Ok(_) => {}
-                    };
+                        }
+                    };   
                 });
             });      
     }
@@ -150,34 +189,34 @@ impl kernel::Platform for Emulator {
     }
 }
 
-struct App<'a, A, B>
-where
-    A: kernel::hil::time::Alarm<'a>,
-    B: kernel::hil::led::Led,
-{
-    alarm: &'a A,
-    led: &'a B,
-}
+// struct App<'a, A, B>
+// where
+//     A: kernel::hil::time::Alarm<'a>,
+//     B: kernel::hil::led::Led,
+// {
+//     alarm: &'a A,
+//     led: &'a B,
+// }
 
-impl<'a, A, B> App<'a, A, B> where
-    A: kernel::hil::time::Alarm<'a>,
-    B: kernel::hil::led::Led,
-{
-    fn init(&self) {
-        self.alarm.set_alarm(self.alarm.now() + 1000);
-    }
-}
+// impl<'a, A, B> App<'a, A, B> where
+//     A: kernel::hil::time::Alarm<'a>,
+//     B: kernel::hil::led::Led,
+// {
+//     fn init(&self) {
+//         self.alarm.set_alarm(self.alarm.now() + 1000);
+//     }
+// }
 
-impl<'a, A, B> kernel::hil::time::AlarmClient for App<'a, A, B>
-where
-    A: kernel::hil::time::Alarm<'a>,
-    B: kernel::hil::led::Led,
-{
-    fn fired(&self) {
-        println!("Blink");
-        self.init();
-    }
-}
+// impl<'a, A, B> kernel::hil::time::AlarmClient for App<'a, A, B>
+// where
+//     A: kernel::hil::time::Alarm<'a>,
+//     B: kernel::hil::led::Led,
+// {
+//     fn fired(&self) {
+//         println!("Blink");
+//         self.init();
+//     }
+// }
 
 fn main() {
     unsafe {
@@ -205,15 +244,15 @@ fn main() {
         let pins = static_init!([&dyn kernel::hil::led::Led; NUM_LEDS], [unix_led]);
         let led = static_init!(LED<'static>, LED::new(pins));
 
-        // Set up app
-        let app = static_init!(App<chip::alarm::UnixAlarm, chip::led::UnixLed>, 
-            App { alarm: &chip.alarm, led: &chip.led });
-            chip.alarm.set_client(app);
-            app.init();
+        // // Set up app
+        // let app = static_init!(App<chip::alarm::UnixAlarm, chip::led::UnixLed>, 
+        //     App { alarm: &chip.alarm, led: &chip.led });
+        //     chip.alarm.set_client(app);
+        //     app.init();
         
         let ipc = kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability);
             
-        let emulator = Emulator { alarm, led };
+        let emulator = Emulator::new(alarm, led);
 
         let processes: [Option<&str>; NUM_PROCS] = 
             [Some("playground"), None, None, None];

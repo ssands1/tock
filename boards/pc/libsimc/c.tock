@@ -42,23 +42,28 @@ void yield_for(bool *cond) {
 }
 
 // TODO: Use dedicated pipe instead of stderr
-long make_call(Syscall_t sys, uint32_t driver, uint32_t subdriver, size_t arg3, 
+size_t make_call(Syscall_t sys, uint32_t driver, uint32_t subdriver, size_t arg3, 
                                                                   size_t arg4) {
     fprintf(stderr, "%u,%u,%u,%zu,%zu\n", sys, driver, subdriver, arg3, arg4);
     // printf("%u,%u,%u,%zu,%zu\n", sys, driver, subdriver, arg3, arg4);
 
-    char inbox[32] = {0};
-    int num_bytes = read(STDIN_FILENO, inbox, sizeof(inbox) / sizeof(char) - 1);
-    if (num_bytes <= 0) {
-        printf("ERROR: couldn't read properly");
-        return -1;
-    }
-
-    long response = atol(inbox);
-    if (response < 0) printf("Warning: syscall returned %ld\n", response);
+    // char inbox[64] = {0};
+    // int num_bytes = read(STDIN_FILENO, inbox, sizeof(inbox) / sizeof(char) - 1);
+    // if (num_bytes <= 0) {
+    //     printf("ERROR: couldn't read properly");
+    //     return -1;
+    // }
+    int j, k, l, m, n;
+    int num_read = scanf("%d %d %d %d %d", &j, &k, &l, &m, &n);
+    
+    printf("I read %d numbers: %d-%d-%d-%d-%d\n", num_read, j,k,l,m,n);
+    
+    
+    // long response = atol(inbox);
+    // if (response < 0) printf("Warning: syscall returned %ld\n", response);
     // printf("Read %d bytes; got a number from Rust: %ld\n", num_bytes, response);
     
-    return response;
+    return j;
 }
 
 // TODO: Verify correctness
@@ -68,7 +73,8 @@ void yield(void) {
         task_cur = (task_cur + 1) % TASK_QUEUE_SIZE;
         task.cb(task.arg0, task.arg1, task.arg2, task.ud);
     } else {
-        long callback = make_call(YIELD, 0, 0, 0, 0);
+        /* subscribe_cb callback = (void *) */ make_call(YIELD, 0, 0, 0, 0);
+        // callback()
     }
 }
 
