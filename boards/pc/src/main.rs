@@ -26,6 +26,7 @@ use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
 use std::alloc::{alloc, dealloc, Layout, System};
+use std::fs::File;
 use std::io::prelude::*;
 use std::io::{BufRead, BufReader};
 use std::mem::size_of;
@@ -33,12 +34,18 @@ use std::process::{Command, Stdio};
 use std::ptr::NonNull;
 use std::thread;
 
-const NUM_PROCS: usize = 4; // set to reflect most chips
+const NUM_PROCS: usize = 1; // set to reflect most chips
 const NUM_LEDS: usize = 1;
 
 #[global_allocator]
 static A: System = System;
 
+const FAULT_RESPONSE: kernel::procs::FaultResponse = kernel::procs::FaultResponse::Panic;
+
+#[link_section = ".app_memory"]
+static mut APP_MEMORY: [u8; 32768] = [0; 32768];
+
+static mut TAB_VEC: Vec<u8> = Vec::new();
 static mut PROCESSES: [Option<&'static dyn kernel::procs::ProcessType>; NUM_PROCS] =
     [None; NUM_PROCS];
 
@@ -144,43 +151,15 @@ impl kernel::Platform for Emulator {
         match driver_num {
             capsules::alarm::DRIVER_NUM => f(Some(self.alarm)),
             capsules::led::DRIVER_NUM => f(Some(self.led)),
-            capsules::console::DRIVER_NUM => f(Some(self.alarm)),
+            // capsules::console::DRIVER_NUM => f(Some(self.led)),
             _ => f(None),
         }
     }
 }
 
-struct App<'a, A, B>
-where
-    A: kernel::hil::time::Alarm<'a>,
-    B: kernel::hil::led::Led,
-{
-    alarm: &'a A,
-    led: &'a B,
-}
-
-impl<'a, A, B> App<'a, A, B> where
-    A: kernel::hil::time::Alarm<'a>,
-    B: kernel::hil::led::Led,
-{
-    fn init(&self) {
-        self.alarm.set_alarm(self.alarm.now() + 1000);
-    }
-}
-
-impl<'a, A, B> kernel::hil::time::AlarmClient for App<'a, A, B>
-where
-    A: kernel::hil::time::Alarm<'a>,
-    B: kernel::hil::led::Led,
-{
-    fn fired(&self) {
-        println!("Blink");
-        self.init();
-    }
-}
-
 fn main() {
     unsafe {
+        let process_mgmt_cap = create_capability!(capabilities::ProcessManagementCapability);
         let main_loop_capability = create_capability!(capabilities::MainLoopCapability);
         let memory_allocation_capability =
             create_capability!(capabilities::MemoryAllocationCapability);
@@ -204,47 +183,32 @@ fn main() {
         let unix_led = static_init!(led::UnixLed<'static>, led::UnixLed::new());
         let pins = static_init!([&dyn kernel::hil::led::Led; NUM_LEDS], [unix_led]);
         let led = static_init!(LED<'static>, LED::new(pins));
-
-        // Set up app
-        let app = static_init!(App<chip::alarm::UnixAlarm, chip::led::UnixLed>, 
-            App { alarm: &chip.alarm, led: &chip.led });
-            chip.alarm.set_client(app);
-            app.init();
-        
-        let ipc = kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability);
             
+        let ipc = kernel::ipc::IPC::new(board_kernel, &memory_allocation_capability);
+        
         let emulator = Emulator { alarm, led };
+        
+        let mut tab_file = match File::open("blink.tab") {
+            Ok(f) => f,
+            Err(e) => panic!("error reading tab")
+        };
+        tab_file.read_to_end(&mut TAB_VEC); // TODO: handle result
+        let tab_slice: &'static [u8] = &TAB_VEC;
 
-        let processes: [Option<&str>; NUM_PROCS] = 
-            [Some("playground"), None, None, None];
+        kernel::procs::load_processes(
+            board_kernel,
+            chip,
+            tab_slice,
+            &mut APP_MEMORY,
+            &mut PROCESSES,
+            FAULT_RESPONSE,
+            &process_mgmt_cap,
+        )
+        .unwrap_or_else(|err| {
+            panic!("Error loading processes!");
+            panic   !("{:?}", err);
+        });
 
-        // TODO: Fix index arg
-        for i in 0..processes.len() { 
-            match processes[i] {
-                None => {},
-                Some(name) => {
-                    let app_id = AppId::new(
-                        board_kernel,
-                        board_kernel.create_process_identifier(),
-                        i
-                    );
-
-                    // TODO: Allocate memory in process.rs, not here
-                    // Note: A grant region is valid once allocated
-                    // for the lifetime of the process.
-                    let alarm_layout = Layout::new::<AlarmData>();
-                    let alarm_ptr = alloc(alarm_layout);
-                    
-                    let process = static_init!(
-                        SimProcess,
-                        SimProcess::create(board_kernel, app_id, alarm_ptr as *mut u8)
-                    );
-                    PROCESSES[i] = Some(process);
-                    emulator.run_app(name, &app_id);
-                    dealloc(alarm_ptr, alarm_layout);
-                }
-            }
-        }
-        board_kernel.kernel_loop(&emulator, chip, Some(&ipc), &main_loop_capability);
+        board_kernel.kernel_loop(&emulator, chip, Some(&ipc), &main_loop_capability);   
     }
 }

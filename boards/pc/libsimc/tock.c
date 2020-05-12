@@ -32,7 +32,7 @@ long make_call(Syscall_t sys, uint32_t driver, uint32_t subdriver, size_t arg3,
         return -1;
     }
 
-    long unsigned response = atol(inbox);
+    long response = atol(inbox);
     if (response < 0) printf("Warning: syscall returned %ld\n", response);
     // printf("Read %d bytes; got a number from Rust: %ld\n", num_bytes, response);
     

@@ -69,7 +69,7 @@ impl<'a> LED<'a> {
     }
 }
 
-impl<P: gpio::Pin> Driver for LED<'_, P> {
+impl Driver for LED<'_> {
     /// Control the LEDs.
     ///
     /// ### `command_num`

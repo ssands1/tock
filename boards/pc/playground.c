@@ -27,7 +27,7 @@ int main() {
     printf("\nTesting Alarm:\n");
     alarm_t alarm;
     // alarm_at(0, my_cb, NULL, &alarm);
-    printf("Alarm reads: %ld\n", alarm_read());
+    printf("Alarm reads: %d\n", alarm_read());
 
     return 0;
 }
